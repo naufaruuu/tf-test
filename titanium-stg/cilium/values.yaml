@@ -1,0 +1,79 @@
+# IPAM Configuration - Use Kubernetes mode (node PodCIDRs)
+ipam:
+  mode: kubernetes
+
+bgpControlPlane:
+  enabled: true
+
+# IPv4 & IPv6 Support                          
+ipv4:
+  enabled: true
+
+
+# IPv4 native routing
+ipv4NativeRoutingCIDR: 10.244.0.0/16
+
+# Kube-proxy replacement (already configured correctly)
+kubeProxyReplacement: true
+
+# Security (keep your existing settings)
+securityContext:
+  capabilities:
+    ciliumAgent:
+      - CHOWN
+      - KILL
+      - NET_ADMIN
+      - NET_RAW
+      - IPC_LOCK
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    cleanCiliumState:
+      - NET_ADMIN
+      - SYS_ADMIN
+      - SYS_RESOURCE
+
+# Cgroup (Talos-specific)
+cgroup:
+  autoMount:
+    enabled: false
+  hostRoot: /sys/fs/cgroup
+
+# KubePrism (Talos load balancer)
+k8sServiceHost: localhost
+k8sServicePort: 7445
+
+# Hubble (observability - keep your settings)
+hubble:
+  relay:
+    enabled: true
+  ui:
+    enabled: true
+  metrics:
+    enabled:
+      - dns
+      - drop
+      - tcp
+      - flow
+      - icmp
+      - http
+
+# BPF settings (keep your optimizations)
+bpf:
+  hostLegacyRouting: false
+  masquerade: true
+  datapathMode: netkit
+
+# Routing (native mode for performance)
+routingMode: native
+autoDirectNodeRoutes: true
+
+# Features (keep your settings)
+l7Proxy: false
+localRedirectPolicy: true
+enableBPFTProxy: true
+l2announcements:
+  enabled: true
