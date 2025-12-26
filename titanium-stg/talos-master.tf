@@ -49,7 +49,7 @@ module "talos_master" {
   }
 
   master_vms = {
-    "PROXMOX" = {
+    "proxmox" = {
       "master-0" = {
         ip              = local.master_ips[0]
         cpu             = 2
