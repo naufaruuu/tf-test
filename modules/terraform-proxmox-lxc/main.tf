@@ -89,8 +89,8 @@ resource "null_resource" "nginx_lb_setup" {
       sleep 10
 
       PROXMOX_HOST="${trimsuffix(trimprefix(var.proxmox.endpoint, "https://"), ":8006")}"
-      PROXMOX_USER="${var.proxmox.ssh_username}"
-      PROXMOX_PASS="${var.proxmox.ssh_password}"
+      PROXMOX_USER="${coalesce(var.proxmox.ssh_username, split("@", var.proxmox.username)[0])}"
+      PROXMOX_PASS="${coalesce(var.proxmox.ssh_password, var.proxmox.password)}"
       CONTAINER_ID="${proxmox_virtual_environment_container.lxc[each.key].vm_id}"
 
       # Use pct exec via Proxmox host to configure nginx

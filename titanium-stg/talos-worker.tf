@@ -69,7 +69,39 @@ module "talos_worker" {
     }
   }
 
-  worker_vms = {}
+  worker_vms = {
+    #"ayumu" = {
+    #  "worker-tier-0" = {
+    #    ip              = "192.168.18.213"
+    #    cpu             = 2
+    #    numa            = true
+    #    cpu_affinity    = "6-7"
+    #    ram_dedicated   = 4096
+    #    disk_size       = 30
+    #    bandwidth_limit = 100
+    #    datastore_id    = "teamgroup-ssd"
+    #    workload        = "tier-0"
+    #    additional_disks = {
+    #      "media" = {
+    #        size         = 30
+    #        datastore_id = "teamgroup-ssd"
+    #        filesystem   = "xfs"
+    #      },
+    #      "data" = {
+    #        size         = 40
+    #        datastore_id = "teamgroup-ssd"
+    #        filesystem   = "xfs"
+    #      }
+    #    }
+    #    sysctls        = {}
+    #    kubelet_extraArgs = {
+    #      kube-reserved: "cpu=600m,memory=1Gi"
+    #      system-reserved: "cpu=500m,memory=1Gi"
+    #    }
+    #    kubelet_extraConfig = {}
+    #  }
+    #}
+  }
 
   network    = local.network
   proxmox    = local.proxmox
