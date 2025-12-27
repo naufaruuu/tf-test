@@ -1,0 +1,66 @@
+apiVersion: "cilium.io/v2alpha1"
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: bgp-pool
+spec:
+  blocks:
+  - cidr: 192.168.95.123/32
+---
+
+# 1. Peer Configuration (how BGP sessions behave)
+apiVersion: cilium.io/v2
+kind: CiliumBGPPeerConfig
+metadata:
+  name: cilium-peer
+spec:
+  timers:
+    holdTimeSeconds: 90
+    keepAliveTimeSeconds: 30
+  gracefulRestart:
+    enabled: true
+    restartTimeSeconds: 120
+  families:
+  - afi: ipv4
+    safi: unicast
+    advertisements:
+      matchLabels:
+        advertise: "bgp"
+
+---
+# 2. Advertisement (what to announce via BGP)
+apiVersion: cilium.io/v2
+kind: CiliumBGPAdvertisement
+metadata:
+  name: bgp-services
+  labels:
+    advertise: "bgp"
+spec:
+  advertisements:
+  - advertisementType: "Service"
+    service:
+      addresses:
+      - LoadBalancerIP
+    selector:
+      matchExpressions:
+      - {key: bgp, operator: In, values: ["true"]}
+
+---
+# 3. Cluster BGP Configuration (main config)
+apiVersion: cilium.io/v2
+kind: CiliumBGPClusterConfig
+metadata:
+  name: cilium-bgp
+spec:
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux
+  bgpInstances:
+  - name: "instance-64512"
+    localASN: 64512
+    localPort: 179
+    peers:
+    - name: "ruijie-switch"
+      peerASN: 64513
+      peerAddress: "192.168.95.200"
+      peerConfigRef:
+        name: "cilium-peer"

@@ -31,6 +31,10 @@ locals {
     root_disk        = "/dev/sda"
     proxy_disabled   = true
     flannel_disabled = true
+    hostDNS          = {
+      enable =  true
+      forwardKubeDNSToHost = false
+    } 
     kernel_logging   = {
       enabled = true
       url     = "udp://127.0.0.1:6050"

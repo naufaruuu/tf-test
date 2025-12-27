@@ -19,6 +19,10 @@ variable "cluster_config" {
       enabled = bool
       url     = string
     }), { enabled = false, url = "" })
+    hostDNS = optional(object({
+      enabled              = bool
+      forwardKubeDNSToHost = optional(bool, false)
+    }), { enabled = false, forwardKubeDNSToHost = false })
   })
 }
 

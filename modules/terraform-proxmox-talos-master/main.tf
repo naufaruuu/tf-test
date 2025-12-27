@@ -58,6 +58,15 @@ locals {
                   format   = "json_lines"
                 }]
               }
+            } : {},
+            # Host DNS feature
+            var.cluster_config.hostDNS.enabled ? {
+              features = {
+                hostDNS = {
+                  enabled              = true
+                  forwardKubeDNSToHost = var.cluster_config.hostDNS.forwardKubeDNSToHost
+                }
+              }
             } : {}
           )
           cluster = {
