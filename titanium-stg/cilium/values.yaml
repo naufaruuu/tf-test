@@ -2,21 +2,23 @@
 ipam:
   mode: kubernetes
 
+# BGP Load Balancer
 bgpControlPlane:
   enabled: true
 
-# IPv4 & IPv6 Support                          
+# L2 Load Balancer - Disabled
+l2announcements:
+  enabled: false
+
+# IPv4 configuration                       
 ipv4:
   enabled: true
+ipv4NativeRoutingCIDR: 10.100.0.0/16
 
-
-# IPv4 native routing
-ipv4NativeRoutingCIDR: 10.244.0.0/16
-
-# Kube-proxy replacement (already configured correctly)
+# Kube-proxy replacement
 kubeProxyReplacement: true
 
-# Security (keep your existing settings)
+# Talos-specific config
 securityContext:
   capabilities:
     ciliumAgent:
@@ -31,12 +33,12 @@ securityContext:
       - FOWNER
       - SETGID
       - SETUID
+      - NET_BIND_SERVICE
     cleanCiliumState:
       - NET_ADMIN
       - SYS_ADMIN
       - SYS_RESOURCE
 
-# Cgroup (Talos-specific)
 cgroup:
   autoMount:
     enabled: false
@@ -46,7 +48,7 @@ cgroup:
 k8sServiceHost: localhost
 k8sServicePort: 7445
 
-# Hubble (observability - keep your settings)
+# Hubble observability
 hubble:
   relay:
     enabled: true
@@ -61,19 +63,28 @@ hubble:
       - icmp
       - http
 
-# BPF settings (keep your optimizations)
+# BPF settings (Enables eBPF host-routing + performance optimizations)
 bpf:
   hostLegacyRouting: false
   masquerade: true
   datapathMode: netkit
+  distributedLRU:
+    enabled: true
+  mapDynamicSizeRatio: 0.08
+
+# BPF Clock Probe 
+bpfClockProbe: true
 
 # Routing (native mode for performance)
 routingMode: native
 autoDirectNodeRoutes: true
 
-# Features (keep your settings)
+# Fair Queue scheduling + TCP BBR congestion control
+bandwidthManager:
+  enabled: true
+  bbr: true 
+
+# Features
 l7Proxy: false
 localRedirectPolicy: true
 enableBPFTProxy: true
-l2announcements:
-  enabled: true
