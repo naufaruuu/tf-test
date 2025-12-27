@@ -32,6 +32,7 @@ module "talos_master" {
     root_disk       = local.cluster_config.root_disk
     kernel_logging  = local.cluster_config.kernel_logging
     service_logging = local.cluster_config.service_logging
+    hostDNS         = local.cluster_config.hostDNS
   }
 
   talos_secrets = {
