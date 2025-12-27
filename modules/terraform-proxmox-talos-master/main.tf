@@ -225,10 +225,10 @@ data "talos_client_configuration" "cluster" {
   depends_on = [proxmox_virtual_environment_vm.master]
 }
 
-# Write talosconfig to temp file for health checks
+# Write talosconfig to temp file for health checks (use same directory as talosconfig_path)
 resource "local_file" "talosconfig" {
   content         = data.talos_client_configuration.cluster.talos_config
-  filename        = "${path.module}/.talosconfig.tmp"
+  filename        = "${dirname(var.talosconfig_path)}/.talosconfig.tmp"
   file_permission = "0600"
 }
 
