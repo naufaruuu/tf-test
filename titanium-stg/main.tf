@@ -32,7 +32,7 @@ locals {
     proxy_disabled   = true
     flannel_disabled = true
     hostDNS          = {
-      enable =  true
+      enabled =  true
       forwardKubeDNSToHost = false
     } 
     kernel_logging   = {
