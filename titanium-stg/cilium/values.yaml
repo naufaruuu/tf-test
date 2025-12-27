@@ -18,16 +18,6 @@ ipv4NativeRoutingCIDR: 10.100.0.0/16
 # Kube-proxy replacement
 kubeProxyReplacement: true
 
-# Bypass Masq IPs
-ipMasqAgent:
-  enabled: true
-  config:
-    nonMasqueradeCIDRs:
-      - 10.100.0.0/16        # Pod CIDR
-      - 169.254.0.0/16       # Link-local (Talos host DNS)
-    masqLinkLocal: false     # Explicitly don't masquerade link-local
-    resyncInterval: 60s
-
 # Talos-specific config
 securityContext:
   capabilities:
