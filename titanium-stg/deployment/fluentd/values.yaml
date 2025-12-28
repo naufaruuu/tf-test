@@ -1,0 +1,420 @@
+terminationGracePeriodSeconds: 300
+
+labels: {}
+
+podLabels: {}
+
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 0
+    maxSurge: 1
+
+image:
+  repository: "fluent/fluentd-kubernetes-daemonset"
+  pullPolicy: "IfNotPresent"
+  tag: "v1.19-debian-elasticsearch8-1"
+
+resources:
+  requests: 
+    cpu: 100m   
+    memory: 1000Mi
+  limits:
+    cpu: 1   
+    memory: 1000Mi
+
+kind: "Deployment"
+replicaCount: 2
+
+serviceAccount:
+  create: false
+rbac:
+  create: false
+
+env:
+  - name: RUBY_GC_HEAP_OLDOBJECT_LIMIT_FACTOR
+
+volumes:
+  - hostPath:
+      path: /sys
+      type: ""
+    name: host-sys
+
+service:
+  type: "ClusterIP"
+  annotations: {}
+  ports:
+  - name: forwarder
+    protocol: TCP
+    containerPort: 24224
+
+plugins:
+- fluent-plugin-rewrite-tag-filter
+- fluent-plugin-route
+- fluent-plugin-systemd
+- fluent-plugin-elasticsearch
+
+configMapConfigs: []
+
+fileConfigs:
+  01_sources.conf: |-
+    ## logs from fluentbit forwarders
+    <source>
+      @type forward
+      @label @FORWARD
+      @log_level warn
+      bind "#{ENV['FLUENTD_FORWARD_BIND'] || '0.0.0.0'}"
+      port "#{ENV['FLUENTD_FORWARD_PORT'] || '24224'}"
+    </source>
+    ## Enable Prometheus end point
+    <source>
+      @type prometheus
+      @id in_prometheus
+      bind "0.0.0.0"
+      port 24231
+      metrics_path "/metrics"
+    </source>
+    <system>
+      workers 3
+    </system>
+
+  02_filters.conf: |-
+    <label @FORWARD>
+      # Re-route fluentd logs. Discard them
+      <match kube.var.log.containers.fluentd**>
+        @type relabel
+        @label @FLUENT_LOG
+      </match>
+
+      ## Get kubernetes fields for kube logs
+      <filter kube.**>
+        @type record_modifier
+        remove_keys kubernetes
+        <record>
+          namespace ${ record.dig("kubernetes","namespace_name") }
+          pod ${ record.dig("kubernetes", "pod_name") }
+          container ${ record.dig("kubernetes", "container_name") }
+          deployment ${record.dig("kubernetes", "labels", "app.kubernetes.io/instance")}
+          host ${ record.dig("kubernetes", "host")}
+          cluster-name "ginko-momose"
+          cluster-kind "kubernetes"
+        </record>
+      </filter>
+
+      ## Add metadata for Talos service logs
+      <filter talos.service>
+        @type record_modifier
+        <record>
+          cluster-name "ginko-momose"
+          cluster-kind "kubernetes"
+          log-type "talos-service"
+        </record>
+      </filter>
+
+      ## Add metadata for Talos kernel logs
+      <filter talos.kernel>
+        @type record_modifier
+        <record>
+          cluster-name "ginko-momose"
+          cluster-kind "kubernetes"
+          log-type "talos-kernel"
+        </record>
+      </filter>
+
+      <match **>
+        @type relabel
+        @label @DISPATCH
+      </match>
+    </label>
+
+  03_dispatch.conf: |-
+    <label @DISPATCH>
+      ## Route Talos logs directly to outputs
+      <match talos.**>
+        @type relabel
+        @label @OUTPUTS
+      </match>
+
+      ## Route Kubernetes logs through rewrite filter
+      <match kube.**>
+        @type rewrite_tag_filter
+
+        <rule>
+          key pod
+          pattern ^(kube-controller-manager-|kube-apiserver-|kube-scheduler-)
+          tag kube-master.${tag}
+          invert false
+        </rule>
+
+        <rule>
+          key deployment
+          pattern ^(traefik-kube-system)$
+          tag traefik.${tag}
+          invert false
+        </rule>
+
+        <rule>
+          key deployment
+          pattern ^(traefik)$
+          tag kubernetes.${tag}
+          invert true
+        </rule>
+        
+      </match>
+
+      <match **>
+        @type relabel
+        @label @OUTPUTS
+      </match>
+    </label>
+
+  04_outputs.conf: |-
+    <label @OUTPUTS>
+      ## Process log_processed field for kube logs
+      <filter kube.** traefik.**>
+        @type record_transformer
+        enable_ruby true
+        <record>
+          log_processed "${
+            if record['log_processed'].nil?
+              if record['log'].is_a?(String)
+                { 'message_parsed' => record['log'] }
+              else
+                { 'message_parsed' => record['log'].to_s }
+              end
+            elsif record['log_processed'].is_a?(Hash)
+              record['log_processed']
+            else
+              { 'message_parsed' => record['log_processed'].to_s }
+            end
+          }"
+        </record>
+      </filter>
+
+      ## Generate hash IDs for all logs
+      <filter **>
+        @type elasticsearch_genid
+        hash_id_key _hash
+      </filter>
+
+      ## Output: Talos Service Logs
+      <match talos.service>
+        @type elasticsearch
+        @id out_talos_service
+        @log_level info
+        host "10.101.209.251"
+        id_key _hash
+        remove_keys _hash
+        port 9200
+        logstash_prefix "talos-service"
+        logstash_format true
+        include_tag_key true
+        user "elastic"
+        password "MD15RNtkUCL833H948wb8c9Y"
+        scheme http
+    
+        reconnect_on_error true
+        reload_on_failure true
+        reload_connections false
+        request_timeout 180s
+        log_es_400_reason true
+        suppress_type_name true
+        time_key "talos-time"
+        slow_flush_log_threshold 180.0
+
+        <buffer>
+          @type file
+          path /fluentd/log/talos-service
+          flush_thread_count 8
+          flush_thread_interval 1
+          flush_interval 5s
+          flush_mode interval
+          total_limit_size 1024MB
+          chunk_limit_size 32MB
+          queue_limit_length 10
+          retry_max_interval 60
+          retry_max_times 2
+          overflow_action drop_oldest_chunk
+          retry_forever false
+          flush_at_shutdown true
+        </buffer>
+      </match>
+
+      ## Output: Talos Kernel Logs
+      <match talos.kernel>
+        @type elasticsearch
+        @id out_talos_kernel
+        @log_level info
+        host "10.101.209.251"
+        id_key _hash
+        remove_keys _hash
+        port 9200
+        logstash_prefix "talos-kernel"
+        logstash_format true
+        include_tag_key true
+        user "elastic"
+        password "MD15RNtkUCL833H948wb8c9Y"
+        scheme http
+    
+        reconnect_on_error true
+        reload_on_failure true
+        reload_connections false
+        request_timeout 180s
+        log_es_400_reason true
+        suppress_type_name true
+        time_key "talos-time"
+        slow_flush_log_threshold 180.0
+
+        <buffer>
+          @type file
+          path /fluentd/log/talos-kernel
+          flush_thread_count 4
+          flush_thread_interval 1
+          flush_interval 10s
+          flush_mode interval
+          total_limit_size 512MB
+          chunk_limit_size 16MB
+          queue_limit_length 5
+          retry_max_interval 60
+          retry_max_times 2
+          overflow_action drop_oldest_chunk
+          retry_forever false
+          flush_at_shutdown true
+        </buffer>
+      </match>
+
+      <match kube-master.**>
+        @type elasticsearch
+        @id out_kube_master
+        @log_level info
+        host "10.101.209.251"
+        id_key _hash
+        remove_keys _hash
+        port 9200
+        logstash_prefix "kube-master"
+        logstash_format true
+        include_tag_key true
+        user "elastic"
+        password "MD15RNtkUCL833H948wb8c9Y"
+        scheme http
+    
+        reconnect_on_error true
+        reload_on_failure true
+        reload_connections false
+        request_timeout 180s
+        log_es_400_reason true
+        suppress_type_name true
+        time_key "@timestamp"
+        slow_flush_log_threshold 180.0
+
+        <buffer>
+          @type file
+          path /fluentd/log/kube-master
+          flush_thread_count 8
+          flush_thread_interval 1
+          flush_interval 5s
+          flush_mode interval
+          total_limit_size 1024MB
+          chunk_limit_size 32MB
+          queue_limit_length 10
+          retry_max_interval 60
+          retry_max_times 2
+          overflow_action drop_oldest_chunk
+          retry_forever false
+          flush_at_shutdown true
+        </buffer>
+      </match>
+
+      ## Output: Traefik Logs
+      <match traefik.**>
+        @type elasticsearch
+        @id out_traefik
+        @log_level info
+        host "10.101.209.251"
+        id_key _hash
+        remove_keys _hash
+        port 9200
+        logstash_prefix "traefik"
+        logstash_format true
+        include_tag_key true
+        user "elastic"
+        password "MD15RNtkUCL833H948wb8c9Y"
+        scheme http
+    
+        reconnect_on_error true
+        reload_on_failure true
+        reload_connections false
+        request_timeout 180s
+        log_es_400_reason true
+        suppress_type_name true
+        time_key "@timestamp"
+        slow_flush_log_threshold 180.0
+
+        <buffer>
+          @type file
+          path /fluentd/log/traefik
+          flush_thread_count 16
+          flush_thread_interval 1
+          flush_interval 5s
+          flush_mode interval
+          total_limit_size 2048MB
+          chunk_limit_size 64MB
+          queue_limit_length 10
+          retry_max_interval 60
+          retry_max_times 2
+          overflow_action drop_oldest_chunk
+          retry_forever false
+          flush_at_shutdown true
+        </buffer>
+      </match>
+
+      ## Output: Kubernetes Logs
+      <match kubernetes.**>
+        @type elasticsearch
+        @id out_kubernetes
+        @log_level info
+        host "10.101.209.251"
+        id_key _hash
+        remove_keys _hash
+        port 9200
+        logstash_prefix "kubernetes"
+        logstash_format true
+        include_tag_key true
+        user "elastic"
+        password "MD15RNtkUCL833H948wb8c9Y"
+        scheme http
+    
+        reconnect_on_error true
+        reload_on_failure true
+        reload_connections false
+        request_timeout 180s
+        log_es_400_reason true
+        suppress_type_name true
+        time_key "@timestamp"
+        slow_flush_log_threshold 180.0
+
+        <buffer>
+          @type file
+          path /fluentd/log/kubernetes
+          flush_thread_count 16
+          flush_thread_interval 1
+          flush_interval 5s
+          flush_mode interval
+          total_limit_size 2048MB
+          chunk_limit_size 64MB
+          queue_limit_length 10
+          retry_max_interval 60
+          retry_max_times 2
+          overflow_action drop_oldest_chunk
+          retry_forever false
+          flush_at_shutdown true
+        </buffer>
+      </match>
+
+    </label>
+
+    <label @ERROR>
+      <match **>
+        @type stdout
+      </match>
+    </label>

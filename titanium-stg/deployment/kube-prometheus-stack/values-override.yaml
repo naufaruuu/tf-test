@@ -1,0 +1,100 @@
+kubeStateMetrics:
+  enabled: true
+  customLabels: {}
+  extraArgs: {}
+  resources:
+    limits:
+      cpu: 20m
+      memory: 100Mi
+    requests:
+      cpu: 20m
+      memory: 100Mi
+
+grafana:
+  sidecar:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 128Mi
+      limits:
+        cpu: 100m
+        memory: 128Mi
+  extraLabels: {}
+  resources:
+    limits:
+      cpu: 100m  
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 512Mi
+
+  grafana.ini:
+    server:
+      domain: grafana.airpazz.com
+      root_url: "https://%(domain)s/"
+  resources:
+    limits:
+      cpu: 500m
+      memory: 500Mi
+  persistence:
+    enabled: true
+    type: sts
+    size: 4Gi
+  ingress:
+    enabled: true
+    hosts:
+      - grafana.airpazz.com
+    path: /
+    tls:
+    - secretName: grafana-airpazz-com-tls
+      hosts:
+      - grafana.airpazz.com
+
+prometheus:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    annotations:
+      cert-manager.io/cluster-issuer: "airpazz-com"
+    hosts:
+      - prometheus.airpazz.com
+    path: /
+    tls:
+    - secretName: prometheus-airpazz-com-tls
+      hosts:
+      - prometheus.airpazz.com
+  prometheusSpec:
+    serviceMonitorSelector: {}
+    serviceMonitorSelectorNilUsesHelmValues: false
+    image:
+      registry: quay.io
+      repository: prometheus/prometheus
+      tag: v3.8.1
+      sha: ""
+    retention: 90d
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1.5Gi
+      limits:
+        cpu: 250m
+        memory: 1.5Gi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          resources:
+            requests:
+              storage: 30Gi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 200Mi
+    limits:
+      cpu: 200m
+      memory: 200Mi
+
+alertmanager:
+  enabled: false

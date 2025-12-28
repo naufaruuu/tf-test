@@ -1,7 +1,10 @@
 init:
+	@command -v sshpass >/dev/null 2>&1 || { echo "Error: sshpass is not installed. Please install it first."; exit 1; }
 	tofu init
 
+
 plan:
+	@command -v sshpass >/dev/null 2>&1 || { echo "Error: sshpass is not installed. Please install it first."; exit 1; }
 	tofu plan
 
 apply:

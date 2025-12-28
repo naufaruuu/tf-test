@@ -1,0 +1,79 @@
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch
+  namespace: logging
+spec:
+  version: 9.2.3
+  nodeSets:
+  - name: default
+    count: 1 
+    config:
+      node.store.allow_mmap: false 
+      http.max_content_length: 1GB
+      http.max_header_size: 32kb
+    podTemplate:
+      metadata:
+        labels:{}
+      spec:
+        nodeSelector:
+          kubernetes.io/hostname: ceras-lilienfeld
+        containers:
+        - name: elasticsearch
+          resources:
+            requests:
+              cpu: 100m
+              memory: 5Gi
+            limits:
+              cpu: 1
+              memory: 5Gi
+
+    volumeClaimTemplates: 
+      - metadata:
+          name: elasticsearch-data
+        spec:
+          accessModes:
+          - ReadWriteOnce
+          resources:
+            requests:
+              storage: 5Gi
+
+  http:
+    tls: # Disabling TLS automatic configuration. Note(3)
+      selfSignedCertificate:
+        disabled: true
+---
+
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: kibana
+  namespace: logging
+spec:
+  version: 9.2.3
+  count: 1
+  podTemplate:
+    metadata:
+      labels:{}
+    spec:
+      containers:
+        - name: kibana
+          resources:
+            requests:
+              cpu: 100m
+              memory: 1Gi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+          env:
+            - name: NODE_OPTIONS
+              value:  "--max-old-space-size=1024"
+            - name: SERVER_PUBLICBASEURL
+              value: "https://kibana-tw.airpazz.com"
+  elasticsearchRef:
+    name: "elasticsearch"
+  http:
+    tls:
+      selfSignedCertificate:
+        disabled: true
+

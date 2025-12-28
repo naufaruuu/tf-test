@@ -1,0 +1,247 @@
+# fluentbit helm chart values
+
+labels: {}
+podLabels: {}
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 200Mi
+  requests:
+    cpu: 100m
+    memory: 200Mi
+
+image:
+  repository: fluent/fluent-bit
+  tag: 4.2.2
+
+# ========== TALOS LOGGING ========== #
+hostNetwork: true
+dnsPolicy: ClusterFirstWithHostNet
+
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/master
+    operator: Exists
+    effect: NoSchedule
+
+extraPorts:
+  - port: 6050
+    containerPort: 6050
+    protocol: UDP
+    name: talos-kernel
+  - port: 6051
+    containerPort: 6051
+    protocol: UDP
+    name: talos-service
+# ========== TALOS LOGGING ========== #
+
+env:
+  # Fluentd deployment service
+  - name: FLUENT_AGGREGATOR_HOST
+    value: "10.111.196.84"
+  - name: FLUENT_AGGREGATOR_PORT
+    value: "24224"
+  - name: NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+  - name: NODE_IP
+    valueFrom:
+      fieldRef:
+        fieldPath: status.hostIP
+
+# Fluentbit config
+config:
+  # fluent-bit.config SERVICE
+  service: |
+    [SERVICE]
+        Daemon Off
+        Flush 1
+        Log_Level info
+        Parsers_File parsers.conf
+        Parsers_File custom_parsers.conf
+        HTTP_Server On
+        HTTP_Listen 0.0.0.0
+        HTTP_Port 2020
+        Health_Check On
+        storage.path /var/log/fluentbit/storage
+        storage.sync normal
+        storage.checksum off
+        storage.backlog.mem_limit 5M
+        storage.metrics on
+
+  # fluent-bit.config INPUT:
+  inputs: |
+    # ========== TALOS LOGGING ==========
+    [INPUT]
+        Name udp
+        Listen 0.0.0.0
+        Port 6051
+        Format json
+        Tag talos.service
+
+    [INPUT]
+        Name udp
+        Listen 0.0.0.0
+        Port 6050
+        Format json
+        Tag talos.kernel
+    # ========== TALOS LOGGING ==========
+
+    [INPUT]
+        Name tail
+        Alias input.kube
+        Path /var/log/containers/*.log
+        Path_Key filename
+        multiline.parser docker, cri
+        DB /var/log/fluentbit/flb_kube.db
+        Tag kube.*
+        Mem_Buf_Limit 5MB
+        storage.type filesystem
+        Skip_Long_Lines On
+
+    [INPUT]
+        Name tail
+        Alias input.host
+        Tag host.*
+        DB /var/log/fluentbit/flb_host.db
+        Path /var/log/auth.log,/var/log/syslog
+        Path_Key filename
+        Mem_Buf_Limit 5MB
+        storage.type filesystem
+        Parser syslog-rfc3164-nopri
+
+  # fluent-bit.config OUTPUT
+  outputs: |
+    [OUTPUT]
+        Name forward
+        Alias output.aggregator
+        match *
+        Host ${FLUENT_AGGREGATOR_HOST}
+        Port ${FLUENT_AGGREGATOR_PORT}
+        tls Off
+        tls.verify Off
+
+  # fluent-bit.config PARSERS:
+  customParsers: |
+    [PARSER]
+        Name syslog-rfc3164-nopri
+        Format regex
+        Regex /^(?<time>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}.[0-9]+\+[0-9]{2}:[0-9]{2}) (?<host>[^ ]*) (?<ident>[a-zA-Z0-9_\/\.\-]*)(?:\[(?<pid>[0-9]+)\])?(?:[^\:]*\:)? *(?<message>.*)$/
+        Time_Key time
+        Time_Format %Y-%m-%dT%H:%M:%S.%L%z
+        Time_Keep Off
+
+  # fluent-bit.config FILTERS:
+  filters: |
+    # Add hostname to Talos service logs
+    [FILTER]
+        Name record_modifier
+        Match talos.service
+        Record hostname ${HOSTNAME}
+        Record node_ip ${NODE_IP}
+
+    # Add hostname to Talos kernel logs
+    [FILTER]
+        Name record_modifier
+        Match talos.kernel
+        Record hostname ${HOSTNAME}
+        Record node_ip ${NODE_IP}
+        
+    [FILTER]
+        name                  multiline
+        match                 *
+        multiline.key_content log
+        multiline.parser      java,python,go
+
+    [FILTER]
+        Name kubernetes
+        Match kube.*
+        Buffer_Size 512k
+        Kube_Tag_Prefix kube.var.log.containers.
+        Merge_Log On
+        Merge_Log_Trim Off
+        Merge_Log_Key log_processed
+        Keep_Log Off
+        K8S-Logging.Parser On
+        K8S-Logging.Exclude On
+        Annotations Off
+        Labels On
+
+    [FILTER]
+        Name modify
+        Match kube.*
+        Remove _p
+        Rename log message
+
+    [FILTER]
+        Name lua
+        Match host.*
+        script /fluent-bit/scripts/adjust_ts.lua
+        call local_timestamp_to_UTC
+
+  # json-exporter config
+  extraFiles:
+    json-exporter-config.yml: |
+      modules:
+        default:
+          metrics:
+            - name: fluenbit_storage_layer
+              type: object
+              path: '{.storage_layer}'
+              help: The total number of chunks in the fs storage
+              values:
+                fs_chunks_up: '{.chunks.fs_chunks_up}'
+                fs_chunks_down: '{.chunks.fs_chunks_down}'
+
+# Fluentbit config Lua Scripts.
+luaScripts:
+  adjust_ts.lua: |
+    function local_timestamp_to_UTC(tag, timestamp, record)
+        local utcdate   = os.date("!*t", ts)
+        local localdate = os.date("*t", ts)
+        localdate.isdst = false -- this is the trick
+        utc_time_diff = os.difftime(os.time(localdate), os.time(utcdate))
+        return 1, timestamp - utc_time_diff, record
+    end
+
+# Init container. Create directory for fluentbit
+initContainers:
+  - name: init-fluentbit-directory
+    image: busybox
+    resources:
+      limits:
+        cpu: 10m 
+        memory: 20Mi 
+      requests:
+        cpu: 10m 
+        memory: 20Mi
+    command: ['/bin/sh', '-c', 'if [ ! -d /var/log/fluentbit ]; then mkdir -p /var/log/fluentbit; fi ; if [ ! -d /var/log/fluentbit/tail-db ]; then mkdir -p /var/log/fluentbit/tail-db; fi ; if [ ! -d /var/log/fluentbit/storage ]; then mkdir -p /var/log/fluentbit/storage; fi']
+    volumeMounts:
+      - name: varlog
+        mountPath: /var/log
+
+# Sidecar container to export storage metrics
+extraContainers:
+  - name: json-exporter
+    image: quay.io/prometheuscommunity/json-exporter
+    command: ['/bin/json_exporter']
+    resources:
+      limits:
+        cpu: 10m
+        memory: 20Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    args: ['--config.file=/json-exporter-config.yml']
+    ports:
+      - containerPort: 7979
+        name: http
+        protocol: TCP
+    volumeMounts:
+      - mountPath: /json-exporter-config.yml
+        name: config
+        subPath: json-exporter-config.yml
